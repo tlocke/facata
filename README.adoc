@@ -1,0 +1,325 @@
+= Facata
+:toc: preamble
+:toclevels: 2
+
+A Python library that provides a simplified alternative to
+https://www.python.org/dev/peps/pep-0249/[DBAPI 2]. It provides a facade in front of
+DBAPI 2 drivers.
+
+
+== Installation
+
+* Create a virtual environment: `python3 -m venv venv`
+* Activate the virtual environment: `source venv/bin/activate`
+* Install: `pip install facata`
+
+
+== Examples
+
+Firstly there is a an example of how to establish a connection for each DBMS /
+driver. Thereafter the examples use SQLite, but apply equally to all DBMS / driver
+combinations.
+
+
+=== Connecting to an SQLite database
+
+Here's an example of how to access an https://www.sqlite.org/[SQLite] database. It uses
+the https://docs.python.org/3/library/sqlite3.html[sqlite3] driver that comes with
+Python.
+
+```
+>>> import facata
+>>>
+>>> with facata.connect("sqlite", "sqlite3", dbname=":memory:") as con:
+...     con.run("SELECT 'Hello'")
+[('Hello',)]
+
+
+```
+
+
+=== Connecting to a PostgreSQL database with pg8000
+
+Connecting to https://www.postgresql.org/[PostgreSQL] with the
+https://github.com/tlocke/pg8000[pg8000] driver requires the dependency `pg8000` to be
+installed by doing `pip install facata[pg8000]`. Then connect to a database as follows:
+
+```
+>>> import facata
+>>>
+>>> with facata.connect(
+...         "postgresql", "pg8000", username="postgres", password="pw") as con:
+...     con.run("SELECT 'Hello'")
+[['Hello']]
+
+```
+
+
+=== Connecting to a PostgreSQL database with psycopg2
+
+Connecting to https://www.postgresql.org/[PostgreSQL] with the
+https://www.psycopg.org/[psycopg2] driver requires the dependency `psycopg2` to be
+installed by doing `pip install facata[psycopg2]`. This will install the binary
+version, but for production use see the
+https://www.psycopg.org/docs/install.html[psycopg installation docs]. Then connect to a
+database as follows:
+
+```
+>>> import facata
+>>>
+>>> with facata.connect(
+...         "postgresql", "psycopg2", username="postgres", password="pw",
+...         host="localhost") as con:
+...     con.run("SELECT 'Hello'")
+[('Hello',)]
+
+```
+
+
+=== Connecting to a MariaDB database with the mariadb driver
+
+Connecting to https://mariadb.com/[MariaDB] with the
+https://mariadb.com/docs/clients/mariadb-connectors/connector-python/[mariadb] driver
+requires the
+https://mariadb.com/docs/clients/mariadb-connectors/connector-c/install/[Connector/C]
+to be installed, and then the dependency `mariadb` can be installed
+by doing `pip install facata[mariadb]`.
+
+```
+>>> import facata
+>>>
+>>> with facata.connect(
+...         "mariadb", "mariadb", username="root", password="pw",
+...         host="127.0.0.1", port=3306) as con:
+...     con.run("SELECT 'Hello'")
+[('Hello',)]
+
+```
+
+
+=== Parameterized SQL
+
+
+```
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>> con.run("SELECT :value", value=1)
+[(1,)]
+>>> con.close()
+
+```
+
+== API Docs
+
+
+=== scramp.MECHANISMS
+
+A tuple of the supported mechanism names.
+
+
+=== scramp.ScramClient
+
+`ScramClient(mechanisms, username, password, channel_binding=None,
+c_nonce=None)`::
+  Constructor of the `ScramClient` class, with the following parameters:
+  `mechanisms`:::
+    A list or tuple of mechanism names. ScramClient will choose the most
+    secure. If `cbind_data` is `None`, the '-PLUS' variants will be filtered
+    out first. The chosen mechanism is available as the property
+    `mechanism_name`.
+  `username`:::
+  `password`:::
+  `channel_binding`:::
+    Providing a value for this parameter allows channel binding to be used (ie.
+    it lets you use mechanisms ending in '-PLUS'). The value for
+    `channel_binding` is a tuple consisting of the channel binding name and
+    the channel binding data. For example, if the channel binding name is
+    'tls-unique', the `channel_binding` parameter would be
+    `('tls-unique', data)`, where `data` is obtained by calling
+    https://docs.python.org/3/library/ssl.html#ssl.SSLSocket.get_channel_binding[SSLSocket.get_channel_binding()].
+  `c_nonce`:::
+    The client nonce. It's sometimes useful to set this when testing /
+    debugging, but in production this should be omitted, in which case
+    `ScramClient` will generate a client nonce.
+
+The `ScramClient` object has the following methods and properties:
+
+`get_client_first()`::
+  Get the client first message.
+`set_server_first(message)`::
+    Set the first message from the server.
+`get_client_final()`::
+  Get the final client message.
+`set_server_final(message)`::
+  Set the final message from the server.
+`mechanism_name`::
+  The mechanism chosen from the list given in the constructor.
+
+
+
+=== scramp.ScramMechanism
+
+`ScramMechanism(mechanism='SCRAM-SHA-256')`::
+  Constructor of the `ScramMechanism` class, with the following parameter:
+  `mechanism`:::
+    The SCRAM mechanism to use.
+
+The `ScramMechanism` object has the following methods and properties:
+
+`make_auth_info(password, iteration_count=None, salt=None)`::
+  returns the tuple `(salt, stored_key, server_key, iteration_count)` which is
+  stored in the authentication database on the server side. It has the
+  following parameters:
+  `password`:::
+    The user's password as a `str`.
+  `iteration_count`:::
+    The rounds as an `int`. If `None` then use the minimum associated with the
+    mechanism.
+  `salt`:::
+    It's sometimes useful to set this binary parameter when testing /
+    debugging, but in production this should be omitted, in which case a salt
+    will be generated.
+
+`make_server(auth_fn, channel_binding=None, s_nonce=None)`::
+    returns a `ScramServer` object. It takes the following parameters:
+
+  `auth_fn`:::
+    This is a function provided by the programmer that has one parameter, a
+    username of type `str` and returns returns the tuple
+    `(salt, stored_key, server_key, iteration_count)`. Where `salt`,
+    `stored_key` and `server_key` are of a binary type, and `iteration_count`
+    is an `int`.
+  `channel_binding`:::
+    Providing a value for this parameter allows channel binding to be used (ie.
+    it lets you use mechanisms ending in '-PLUS'). The value for
+    `channel_binding` is a tuple consisting of the channel binding name and
+    the channel binding data. For example, if the channel binding name is
+    'tls-unique', the `channel_binding` parameter would be
+    `('tls-unique', data)`, where `data` is obtained by calling
+    https://docs.python.org/3/library/ssl.html#ssl.SSLSocket.get_channel_binding[SSLSocket.get_channel_binding()].
+  `s_nonce`:::
+    The server nonce as a `str`. It's sometimes useful to set this when testing
+    / debugging, but in production this should be omitted, in which case
+    `ScramServer` will generate a server nonce.
+
+`make_stored_server_keys(salted_password)`::
+    returns `(stored_key, server_key)` tuple of `bytes` objects given a salted
+    password. This is useful if you want to use a separate hashing
+    implementation from the one provided by Scramp. It takes the following
+    parameter:
+
+  `salted_password`:::
+    A binary object representing the hashed password.
+
+`iteration_count`::
+    The minimum iteration count recommended for this mechanism.
+
+
+=== scramp.ScramServer
+
+The `ScramServer` object has the following methods:
+
+`set_client_first(message)`::
+  Set the first message from the client.
+`get_server_first()`::
+  Get the server first message.
+`set_client_final(message)`::
+  Set the final client message.
+`get_server_final()`::
+  Get the server final message.
+
+
+=== scramp.make_channel_binding()
+
+A helper function that makes a `channel_binding` tuple when given a channel
+binding name and an SSL socket. The parameters are:
+
+  `name`:::
+    A channel binding name such as 'tls-unique' or 'tls-server-end-point'.
+  `ssl_socket`:::
+    An instance of an
+    https://docs.python.org/3/library/ssl.html#ssl.SSLSocket[ssl socket].
+
+
+== Testing
+
+* Activate the virtual environment: `source venv/bin/activate`
+* Install `tox`: `pip install tox`
+* Run `tox`: `tox`
+
+
+== Doing A Release Of Scramp
+
+Run `tox` to make sure all tests pass, then update the release notes, then do:
+
+```
+git tag -a x.y.z -m "version x.y.z"
+rm -r dist
+python setup.py sdist bdist_wheel --python-tag py3
+for f in dist/*; do gpg --detach-sign -a $f; done
+twine upload dist/*
+```
+
+
+== Release Notes
+
+=== Version 1.4.0, 2021-03-28
+
+* Raise an exception if the client receives an error from the server.
+
+
+=== Version 1.3.0, 2021-03-28
+
+* As the specification allows, server errors are now sent to the client in the
+  `server_final` message, an exception is still thrown as before.
+
+
+=== Version 1.2.2, 2021-02-13
+
+* Fix bug in generating the AuthMessage. It was incorrect when channel binding
+  was used. So now Scramp supports channel binding.
+
+
+=== Version 1.2.1, 2021-02-07
+
+* Add support for channel binding.
+
+* Add support for SCRAM-SHA-512 and SCRAM-SHA3-512 and their channel binding
+  variants.
+
+
+=== Version 1.2.0, 2020-05-30
+
+* This is a backwardly incompatible change on the server side, the client side
+  will work as before. The idea of this change is to make it possible to have
+  an authentication database. That is, the authentication information can be
+  stored, and then retrieved when needed to authenticate the user.
+
+* In addition, it's now possible on the server side to use a third party
+  hashing library such as passlib as the hashing implementation.
+
+
+=== Version 1.1.1, 2020-03-28
+
+* Add the README and LICENCE to the distribution.
+
+
+=== Version 1.1.0, 2019-02-24
+
+* Add support for the SCRAM-SHA-1 mechanism.
+
+
+=== Version 1.0.0, 2019-02-17
+
+* Implement the server side as well as the client side.
+
+
+=== Version 0.0.0, 2019-02-10
+
+* Copied SCRAM implementation from https://github.com/tlocke/pg8000[pg8000].
+  The idea is to make it a general SCRAM implemtation. Credit to the
+  https://github.com/cagdass/scrampy[Scrampy] project which I read through to
+  help with this project. Also credit to the
+  https://github.com/efficks/passlib[passlib] project from which I copied the
+  `saslprep` function.
