@@ -1,20 +1,87 @@
 from contextlib import AbstractContextManager
 
 
-class Connection(AbstractContextManager):
-    def __init__(self, con):
-        self.con = con
+class PreparedStatement(AbstractContextManager):
+    def __init__(self, ps):
+        self.ps = ps
 
-    def run(self, sql, **params):
-        cur = self.con.cursor()
-        cur.execute(sql, params)
-        return cur.fetchall()
+    def run(self, **params):
+        return self.ps.run(**params)
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
     def close(self):
+        self.ps.close()
+
+
+class Connection(AbstractContextManager):
+    def __init__(self, con, module=None):
+        self.con = con
+        self.cur = con.cursor()
+        self.module = module
+
+    def run(self, sql, **params):
+        self.cur.execute(sql, params)
+        return self.cur.fetchall()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def close(self):
+        self.cur.close()
         self.con.close()
+
+    def register_py_to_db(self, cls, type_code, adapter):
+        pass
+
+    def register_db_to_py(self, type_code, adapter):
+        pass
+
+    def prepare(self, sql):
+        class Ps:
+            def __init__(self, con, sql):
+                self.con = con
+                self.sql = sql
+
+            def run(self, **params):
+                return self.con.run(sql, **params)
+
+            def close(self):
+                pass
+
+        return Ps(self, sql)
+
+    @property
+    def columns(self):
+        description = self.cur.description
+        if description is None:
+            return None
+        else:
+            cols = []
+            # column name, type_code, display_size, internal_size, precision,
+            # scale, null_ok
+            for col in description:
+                cols.append(
+                    dict(
+                        zip(
+                            (
+                                "name",
+                                "type_code",
+                                "display_size",
+                                "internal_size",
+                                "precision",
+                                "scale",
+                            ),
+                            col,
+                        )
+                    )
+                )
+            return cols
+
+    @property
+    def connection(self):
+        return self.con
 
 
 OUTSIDE = 0  # outside quoted string

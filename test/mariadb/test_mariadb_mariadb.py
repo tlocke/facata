@@ -1,7 +1,7 @@
 from facata import connect
 
 
-def test_mariadb_mariadb_connection(mariadb_host):
+def test_connect(mariadb_host):
     con = connect(
         "mariadb",
         "mariadb",

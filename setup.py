@@ -29,9 +29,10 @@ setup(
     python_requires=">=3.6",
     install_requires=[],
     extras_require={
-        "mariadb": "mariadb",
-        "pg8000": "pg8000>=1.20.0",
-        "psycopg2": "psycopg2-binary",
+        "mariadb": "mariadb>=1.0.7",
+        "pg8000": "pg8000>=1.21.0",
+        "psycopg2": "psycopg2-binary>=2.9.1",
+        "mysql-connector": "mysql-connector-python>=8.0.26",
     },
     classifiers=[
         "Development Status :: 3 - Alpha",

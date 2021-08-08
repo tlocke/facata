@@ -2,16 +2,28 @@ from facata.utils import Connection, to_pyformat
 
 
 class PostgresqlPsycopg2Connection(Connection):
-    def __init__(self, con):
-        super().__init__(con)
-
     def run(self, sql, **params):
-        cur = self.con.cursor()
+        self.cur.execute(to_pyformat(sql), params)
+        return None if self.cur.description is None else self.cur.fetchall()
 
-        psql = to_pyformat(sql)
+    @property
+    def notifications(self):
+        return self.con.notices
 
-        cur.execute(psql, params)
-        return cur.fetchall()
+    @property
+    def parameter_statuses(self):
+        return []
+
+    def register_py_to_db(self, cls, type_code, adapter):
+        from psycopg2.extensions import register_adapter
+
+        register_adapter(cls, adapter)
+
+    def register_db_to_py(self, type_code, adapter):
+        from psycopg2.extensions import new_type, register_type
+
+        TYP = new_type((type_code,), str(type_code), adapter)
+        register_type(TYP)
 
 
 def connect(dbname, username, password, host, port, params):
@@ -23,5 +35,6 @@ def connect(dbname, username, password, host, port, params):
         params["port"] = port
 
     con = psycopg2.connect(dbname=dbname, user=username, password=password, **params)
+    con.autocommit = True
 
     return PostgresqlPsycopg2Connection(con)

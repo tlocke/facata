@@ -1,4 +1,5 @@
 import facata.mariadb_mariadb
+import facata.mysql_mysqlconnector
 import facata.postgresql_pg8000
 import facata.postgresql_psycopg2
 import facata.sqlite_sqlite3
@@ -8,6 +9,9 @@ from facata.exceptions import FacataException
 CONNECT_FUNCS = {
     "mariadb": {
         "mariadb": facata.mariadb_mariadb.connect,
+    },
+    "mysql": {
+        "mysql-connector": facata.mysql_mysqlconnector.connect,
     },
     "postgresql": {
         "pg8000": facata.postgresql_pg8000.connect,
@@ -23,7 +27,7 @@ def connect(
     dbms,
     driver,
     dbname=None,
-    username=None,
+    user=None,
     password=None,
     host=None,
     port=None,
@@ -45,4 +49,4 @@ def connect(
             f"The driver must be one of {list(dbms_connects.keys())}, but the "
             f"specified driver was {e}"
         )
-    return connect_f(dbname, username, password, host, port, params)
+    return connect_f(dbname, user, password, host, port, params)

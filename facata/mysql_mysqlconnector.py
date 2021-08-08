@@ -1,7 +1,7 @@
 from facata.utils import Connection, to_pyformat
 
 
-class MariadbMariadbConnection(Connection):
+class MysqlMysqlConnectConnection(Connection):
     def run(self, sql, **params):
         self.cur.execute(to_pyformat(sql), params)
         return None if self.cur.description is None else self.cur.fetchall()
@@ -15,15 +15,15 @@ class MariadbMariadbConnection(Connection):
         return []
 
 
-def connect(dbname, username, password, host, port, params):
-    import mariadb
+def connect(dbname, user, password, host, port, params):
+    import mysql.connector
 
-    for param, paramname in ((dbname, "database"), (port, "port")):
+    for param, paramname in ((port, "port"),):
         if param is not None:
             params[paramname] = param
 
         if "autocommit" not in params:
             params["autocommit"] = True
 
-    c = mariadb.connect(host=host, user=username, password=password, **params)
-    return MariadbMariadbConnection(c)
+    c = mysql.connector.connect(user=user, password=password, database=dbname, **params)
+    return MysqlMysqlConnectConnection(c)

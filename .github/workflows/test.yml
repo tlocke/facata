@@ -34,6 +34,18 @@ jobs:
           --health-timeout=2s
           --health-retries=4
 
+      mysql:
+        image: mysql:latest
+        env:
+          MYSQL_ROOT_PASSWORD: pw
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=5s
+          --health-timeout=2s
+          --health-retries=4
+        ports:
+          - 3305:3306
+
     steps:
       - name: Set up MariaDB Connector
         run: |
@@ -43,11 +55,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-mock .[mariadb,pg8000,psycopg2]
+          pip install pytest pytest-mock .[mariadb,pg8000,psycopg2,mysql-connector]
 
       - name: Run pytest tests
-        run: |
-          python -m pytest -x -v --mariadb-host=mariadb --postgresql-host=postgresql test 
+        run: >-
+          python -m pytest -x -v
+          --mariadb-host=mariadb
+          --postgresql-host=postgresql
+          --mysql-host=mysql
+          test 
 
   checks:
 
@@ -72,8 +88,23 @@ jobs:
           - 3306:3306
         env:
           MYSQL_ROOT_PASSWORD: pw
-        options: --health-cmd="mysqladmin ping" --health-interval=5s --health-timeout=2s --health-retries=3
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=5s
+          --health-timeout=2s
+          --health-retries=3
 
+      mysql:
+        image: mysql:latest
+        env:
+          MYSQL_ROOT_PASSWORD: pw
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=5s
+          --health-timeout=2s
+          --health-retries=4
+        ports:
+          - 3305:3306
 
     steps:
       - name: Set up Python
@@ -88,11 +119,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flake8-alphabetize black .[mariadb,pg8000,psycopg2]
+          pip install flake8-alphabetize black .[mariadb,pg8000,psycopg2,mysql-connector]
 
       - name: Run checks
         run: |
           black --check .
-          python -m doctest README.adoc
+          python -m doctest -o ELLIPSIS README.adoc
           python setup.py check
           flake8 .

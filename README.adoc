@@ -14,45 +14,1095 @@ DBAPI 2 drivers.
 * Install: `pip install facata`
 
 
-== Examples
-
-Firstly there is a an example of how to establish a connection for each DBMS /
-driver. Thereafter the examples use SQLite, but apply equally to all DBMS / driver
-combinations.
+== Examples For SQLite With SQLite3
 
 
-=== Connecting to an SQLite database
+=== Basic Example
 
 Here's an example of how to access an https://www.sqlite.org/[SQLite] database. It uses
 the https://docs.python.org/3/library/sqlite3.html[sqlite3] driver that comes with
-Python.
+Python:
 
-```
+[source,python]
+----
 >>> import facata
 >>>
->>> with facata.connect("sqlite", "sqlite3", dbname=":memory:") as con:
-...     con.run("SELECT 'Hello'")
-[('Hello',)]
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>>
+>>> # Create a temporary table
+>>>
+>>> con.run("CREATE TEMPORARY TABLE book (title TEXT)")
+>>>
+>>> # Populate the table
+>>>
+>>> for title in ("Ender's Game", "The Magus"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> # Print all the rows in the table
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+("Ender's Game",)
+('The Magus',)
+
+----
 
 
-```
+=== Transactions
+
+Here's how to run groups of SQL statements in a
+https://en.wikipedia.org/wiki/Database_transaction#In_SQL[transaction]:
+
+----
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>>
+>>> con.run("BEGIN TRANSACTION")
+>>> con.run("CREATE TEMPORARY TABLE book (title TEXT)")
+>>> for title in ("Ender's Game", "The Magus", "Phineas Finn"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>> con.run("COMMIT")
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+("Ender's Game",)
+('The Magus',)
+('Phineas Finn',)
+
+----
+
+Rolling back a transaction:
+
+----
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>>
+>>> con.run("BEGIN TRANSACTION")
+>>> con.run("CREATE TEMPORARY TABLE book (title TEXT)")
+>>> for title in ("Ender's Game", "The Magus", "Phineas Finn"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>> con.run("COMMIT")
+>>>
+>>> con.run("BEGIN TRANSACTION")
+>>> con.run("DELETE FROM book WHERE title = :title", title="Phineas Finn") 
+>>> con.run("ROLLBACK")
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+("Ender's Game",)
+('The Magus',)
+('Phineas Finn',)
+
+----
 
 
-=== Connecting to a PostgreSQL database with pg8000
+=== Query Using Fuctions
+
+Another query, using an SQLite function:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3",  dbname=":memory:")
+>>>
+>>> con.run("SELECT datetime(1092941466, 'unixepoch');")
+[('2004-08-19 18:51:06',)]
+
+----
+
+
+=== Retrieve Column Metadata From Results
+
+Find the column metadata returned from a query:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>>
+>>> con.run("create temporary table quark (spin text)")
+>>> for spin in ('Up', 'Down'):
+...     con.run("INSERT INTO quark (spin) VALUES (:spin)", spin=spin)
+>>> # Now execute the query
+>>>
+>>> con.run("SELECT * FROM quark")
+[('Up',), ('Down',)]
+>>>
+>>> # and read the metadata
+>>>
+>>> con.columns
+[{'name': 'spin', 'type_code': None, 'display_size': None, 'internal_size': None, 'precision': None, 'scale': None}]
+>>>
+>>> # Show just the column names
+>>>
+>>> [c['name'] for c in con.columns]
+['spin']
+
+----
+
+
+=== Many SQL Statements Can't Be Parameterized
+
+In SQLite parameters can only be used for data values. Sometimes this might not work as
+expected, for example the following fails:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>>
+>>> con.run("SELECT 'silo 1' LIMIT :lim", lim='ALL')
+Traceback (most recent call last):
+sqlite3.IntegrityError: datatype mismatch
+
+----
+
+You might think that the following would work, but in fact the server doesn't
+like it:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>>
+>>> con.run("SELECT 'silo 1' WHERE 'a' IN :v", v=('a', 'b'))
+Traceback (most recent call last):
+sqlite3.OperationalError: near ":v": syntax error
+
+----
+
+
+=== Execute SQL Scripts
+
+If you want to execute a series of SQL statements (eg. an `.sql` file), with SQLite
+you need to access the the underlying connection with and use SQLite3's
+`executescript()` method:
+
+[source,python]
+----
+
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>>
+>>> statements = """
+...     CREATE TEMPORARY TABLE quark (spin text);
+...     INSERT INTO quark (spin) VALUES ('Up');
+...     INSERT INTO quark (spin) VALUES ('Down');"""
+>>>
+>>> con.connection.executescript(statements)
+<sqlite3.Cursor object at ...>
+>>> con.run("SELECT * FROM quark")
+[('Up',), ('Down',)]
+
+----
+
+A caveat is that when executing scripts you can't have any parameters.
+
+
+=== Quoted Identifiers in SQL
+
+Say you had a column called `My Column`. Since it's case sensitive and
+contains a space, you'd have to https://www.sqlite.org/lang_keywords.html[surround it
+by double quotes]. But you can't do:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>>
+>>> con.run("select 'hello' as "My Column"")
+Traceback (most recent call last):
+SyntaxError: invalid syntax
+
+----
+
+since Python uses double quotes to delimit string literals, so one solution is
+to use Python's
+https://docs.python.org/3/tutorial/introduction.html#strings[triple quotes] to delimit
+the string instead:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>>
+>>> con.run('''select 'hello' as "My Column"''')
+[('hello',)]
+
+----
+
+
+=== Custom Adapter From A Python Type To An SQLite Type
+
+Sqlite3 has a mapping from Python types to PostgreSQL types for when it needs
+to send SQL parameters to the server. The default mapping that comes with
+SQLite is fairly limited, but you can add custom conversions with an adapter.
+
+
+By default, a Python `decimal.Decimal` object can't be used as a parameter but here's
+an example of how to register an adapter for it:
+
+[source,python]
+----
+>>> from decimal import Decimal
+>>> import facata
+>>>
+>>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
+>>>
+>>> def decimal_py_to_db(dec):
+...     return str(dec)  # Must return int, float, str or bytes
+>>>
+>>> con.register_py_to_db(Decimal, None, decimal_py_to_db)
+>>>
+>>> con.run("SELECT :val", val=Decimal('0.1'))
+[('0.1',)]
+
+----
+
+Note that it still came back as a `str` object because we only changed the mapping from
+Python to SQLite. See below for an example of how to change the mapping from SQLite to
+Python.
+
+
+=== Custom Adapter From An SQLite Type To A Python Type
+
+SQLite3 has a mapping from SQLite types to Python types for when it receives SQL
+results from the server. With a custom adapter you can add a new mapping or replace
+the default mapping. Here's an example:
+
+
+[source,python]
+----
+>>> from decimal import Decimal
+>>> import sqlite3
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "sqlite", "sqlite3", dbname=":memory:", detect_types=sqlite3.PARSE_DECLTYPES)
+>>> 
+>>> def decimal_db_to_py(data):  # The parameter is of type bytes
+...     return Decimal(data.decode('ascii'))
+>>>
+>>> con.register_db_to_py('decimal', decimal_db_to_py)
+>>>
+>>> con.run("CREATE TEMPORARY TABLE book (title TEXT, price decimal)")
+>>> con.run(
+...     "INSERT INTO book (title, price) VALUES (:title, :price)",
+...     title="The Island", price='7.99')
+>>>
+>>> con.run("SELECT * FROM book")
+[('The Island', Decimal('7.99'))]
+
+----
+
+Note that registering the 'db to py' adapter only afected the mapping from the SQLite
+type to the Python type. See above for an example of how to change the mapping from
+Python to SQLite.
+
+
+== Examples For PostgreSQL With pg8000
+
+=== Connecting To A Database
 
 Connecting to https://www.postgresql.org/[PostgreSQL] with the
 https://github.com/tlocke/pg8000[pg8000] driver requires the dependency `pg8000` to be
 installed by doing `pip install facata[pg8000]`. Then connect to a database as follows:
 
-```
+[source,python]
+----
 >>> import facata
 >>>
->>> with facata.connect(
-...         "postgresql", "pg8000", username="postgres", password="pw") as con:
+>>> with facata.connect("postgresql", "pg8000", user="postgres", password="pw") as con:
 ...     con.run("SELECT 'Hello'")
 [['Hello']]
 
-```
+----
+
+
+=== Basic Example
+
+Import `facacta`, connect to the database, create a table, add some rows and then
+query the table:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> # Connect to the database with user name postgres
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> # Create a temporary table
+>>>
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> # Populate the table
+>>>
+>>> for title in ("Ender's Game", "The Magus"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> # Print all the rows in the table
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+[1, "Ender's Game"]
+[2, 'The Magus']
+
+----
+
+
+=== Transactions
+
+Here's how to run groups of SQL statements in a
+https://www.postgresql.org/docs/current/tutorial-transactions.html[transaction]:
+
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("START TRANSACTION")
+>>>
+>>> # Create a temporary table
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> for title in ("Ender's Game", "The Magus", "Phineas Finn"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> con.run("COMMIT")
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+[1, "Ender's Game"]
+[2, 'The Magus']
+[3, 'Phineas Finn']
+
+----
+
+rolling back a transaction:
+
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> # Create a temporary table
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> for title in ("Ender's Game", "The Magus", "Phineas Finn"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> con.run("START TRANSACTION")
+>>>
+>>> con.run("DELETE FROM book WHERE title = :title", title="Phineas Finn") 
+>>>
+>>> con.run("ROLLBACK")
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+[1, "Ender's Game"]
+[2, 'The Magus']
+[3, 'Phineas Finn']
+
+----
+
+
+=== Query Using Fuctions
+
+Another query, using some PostgreSQL functions:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("SELECT extract(millennium from now())")
+[[3.0]]
+
+----
+
+
+=== Interval Type
+
+A query that returns the PostgreSQL interval type:
+
+[source,python]
+----
+>>> import datetime
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> ts = datetime.date(1980, 4, 27)
+>>> con.run("SELECT timestamp '2013-12-01 16:06' - :ts", ts=ts)
+[[datetime.timedelta(days=12271, seconds=57960)]]
+
+----
+
+
+=== Point Type
+
+A round-trip with a
+https://www.postgresql.org/docs/current/datatype-geometric.html[PostgreSQL
+point] type:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("SELECT CAST(:pt as point)", pt='(2.3,1)')
+[['(2.3,1)']]
+
+----
+
+
+=== Client Encoding
+
+When communicating with the server, pg8000 uses the character set that the
+server asks it to use (the client encoding). By default the client encoding is
+the database's character set (chosen when the database is created), but the
+client encoding can be changed in a number of ways (eg. setting
+CLIENT_ENCODING in postgresql.conf). Another way of changing the client
+encoding is by using an SQL command. For example:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("SET CLIENT_ENCODING TO 'UTF8'")
+>>>
+>>> con.run("SHOW CLIENT_ENCODING")
+[['UTF8']]
+
+----
+
+
+=== JSON
+
+https://www.postgresql.org/docs/current/datatype-json.html[JSON] always comes
+back from the server de-serialized. If the JSON you want to send is a `dict`
+then you can just do:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> val = {'name': 'Apollo 11 Cave', 'zebra': True, 'age': 26.003}
+>>> con.run("SELECT :apollo", apollo=val)
+[[{'age': 26.003, 'name': 'Apollo 11 Cave', 'zebra': True}]]
+
+----
+
+JSON can always be sent in serialized form to the server:
+
+[source,python]
+----
+>>> import json
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> val = ['Apollo 11 Cave', True, 26.003]
+>>> con.run("SELECT CAST(:apollo as jsonb)", apollo=json.dumps(val))
+[[['Apollo 11 Cave', True, 26.003]]]
+
+----
+
+
+=== Retrieve Column Metadata From Results
+
+Find the column metadata returned from a query:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("create temporary table quark (id serial, name text)")
+>>>
+>>> for name in ('Up', 'Down'):
+...     con.run("INSERT INTO quark (name) VALUES (:name)", name=name)
+>>>
+>>> # Now execute the query
+>>>
+>>> con.run("SELECT * FROM quark")
+[[1, 'Up'], [2, 'Down']]
+>>>
+>>> # and retried the metadata
+>>>
+>>> con.columns
+[{'table_oid': ..., 'column_attrnum': 1, 'type_oid': 23, 'type_size': 4, 'type_modifier': -1, 'format': 0, 'name': 'id'}, {'table_oid': ..., 'column_attrnum': 2, 'type_oid': 25, 'type_size': -1, 'type_modifier': -1, 'format': 0, 'name': 'name'}]
+>>>
+>>> # Show just the column names
+>>>
+>>> [c['name'] for c in con.columns]
+['id', 'name']
+
+----
+
+
+=== Notices, Notifications And Parameter Statuses
+
+To access the PostgreSQL https://www.postgresql.org/docs/current/static/plpgsql-errors-and-messages.html[notices]
+you need to obtain the underlying pg8000 connection. The notices are stored in a deque
+called `Connection.notices` and added using the `append()` method. Similarly there are `Connection.notifications` for
+https://www.postgresql.org/docs/current/static/sql-notify.html[notifications]
+and `Connection.parameter_statuses` for changes to the server configuration. Here's an
+example:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("LISTEN aliens_landed")
+>>> con.run("NOTIFY aliens_landed")
+>>>
+>>> # A notification is a tuple containing (backend_pid, channel, payload)
+>>>
+>>> con.connection.notifications[0]
+(..., 'aliens_landed', '')
+
+----
+
+
+=== LIMIT ALL
+
+You might think that the following would work, but in fact it fails:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("SELECT 'silo 1' LIMIT :lim", lim='ALL')
+Traceback (most recent call last):
+pg8000.exceptions.DatabaseError: ...
+
+----
+
+Instead the https://www.postgresql.org/docs/current/sql-select.html[docs say]
+that you can send `null` as an alternative to `ALL`, which does work:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("SELECT 'silo 1' LIMIT :lim", lim=None)
+[['silo 1']]
+
+----
+
+
+=== IN and NOT IN
+
+You might think that the following would work, but in fact the server doesn't
+like it:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("SELECT 'silo 1' WHERE 'a' IN :v", v=('a', 'b'))
+Traceback (most recent call last):
+pg8000.exceptions.DatabaseError: ...
+
+----
+
+instead you can write it using the
+https://www.postgresql.org/docs/current/functions-array.html[`unnest`]
+function:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("SELECT 'silo 1' WHERE 'a' IN (SELECT unnest(:v))", v=('a', 'b'))
+[['silo 1']]
+
+----
+
+and you can do the same for `NOT IN`.
+
+
+=== Many SQL Statements Can't Be Parameterized
+
+In PostgreSQL parameters can only be used for
+https://www.postgresql.org/docs/current/xfunc-sql.html#XFUNC-SQL-FUNCTION-ARGUMENTS[data values, not identifiers]. Sometimes this might not work as expected,
+for example the following fails:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("CREATE USER juan WITH PASSWORD :password", password='quail')
+Traceback (most recent call last):
+pg8000.exceptions.DatabaseError: ...
+
+----
+
+It fails because the PostgreSQL server doesn't allow this statement to have
+any parameters. There are many SQL statements that one might think would have
+parameters, but don't.
+
+
+=== COPY From And To A File
+
+The SQL https://www.postgresql.org/docs/current/sql-copy.html[COPY] statement
+can be used to copy from and to a file or file-like object. First we need to obtain the
+underlying pg8000 connection. Here' an example using the CSV format:
+
+[source,python]
+----
+
+>>> from io import StringIO
+>>> import csv
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>> connection = con.connection
+>>>
+>>> # Create a CSV file in memory
+>>>
+>>> stream_in = StringIO()
+>>> csv_writer = csv.writer(stream_in)
+>>> csv_writer.writerow([1, "electron"])
+12
+>>> csv_writer.writerow([2, "muon"])
+8
+>>> csv_writer.writerow([3, "tau"])
+7
+>>> stream_in.seek(0)
+0
+>>>
+>>> # Create a table and then copy the CSV into it
+>>>
+>>> connection.run("CREATE TEMPORARY TABLE lepton (id SERIAL, name TEXT)")
+>>>
+>>> connection.run("COPY lepton FROM STDIN WITH (FORMAT CSV)", stream=stream_in)
+>>>
+>>> # COPY from a table to a stream
+>>>
+>>> stream_out = StringIO()
+>>> connection.run("COPY lepton TO STDOUT WITH (FORMAT CSV)", stream=stream_out)
+>>> stream_out.seek(0)
+0
+>>> for row in csv.reader(stream_out):
+...     print(row)
+['1', 'electron']
+['2', 'muon']
+['3', 'tau']
+
+----
+
+
+=== Execute Multiple SQL Statements
+
+If you want to execute a series of SQL statements (eg. an `.sql` file), you
+can run them as expected:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> statements = "SELECT 5; SELECT 'Erich Fromm';"
+>>>
+>>> con.run(statements)
+[[5], ['Erich Fromm']]
+
+----
+
+The only caveat is that when executing multiple statements you can't have any
+parameters.
+
+
+=== Quoted Identifiers in SQL
+
+Say you had a column called `My Column`. Since it's case sensitive and
+contains a space, you'd have to
+https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERSdouble[surround it by double quotes]. But you can't do:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("select 'hello' as "My Column"")
+Traceback (most recent call last):
+SyntaxError: invalid syntax
+
+----
+
+since Python uses double quotes to delimit string literals, so one solution is
+to use Python's
+https://docs.python.org/3/tutorial/introduction.html#strings[triple quotes]
+to delimit the string instead:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run('''select 'hello' as "My Column"''')
+[['hello']]
+
+----
+
+
+=== Custom Adapter From A Python Type To A PostgreSQL Type
+
+pg8000 has a mapping from Python types to PostgreSQL types for when it needs
+to send SQL parameters to the server. The default mapping that comes with
+pg8000 is designed to work well in most cases, but you might want to add or
+replace the default mapping.
+
+A Python `datetime.timedelta` object is sent to the server as a PostgreSQL
+`interval` type,  which has the `oid` 1186. But let's say we wanted to create
+our own Python class to be sent as an `interval` type. Then we'd have to
+register an adapter:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> class MyInterval(str):
+...     pass
+>>>
+>>> def my_interval_py_to_db(my_interval):
+...     return my_interval  # Must return a str
+>>>
+>>> con.register_py_to_db(MyInterval, 1186, my_interval_py_to_db)
+>>> con.run("SELECT :interval", interval=MyInterval("2 hours"))
+[[datetime.timedelta(seconds=7200)]]
+
+----
+
+Note that it still came back as a `datetime.timedelta` object because we only
+changed the mapping from Python to PostgreSQL. See below for an example of how
+to change the mapping from PostgreSQL to Python.
+
+
+=== Custom adapter from a PostgreSQL type to a Python type
+
+pg8000 has a mapping from PostgreSQL types to Python types for when it receives
+SQL results from the server. The default mapping that comes with pg8000 is
+designed to work well in most cases, but you might want to add or replace the
+default mapping.
+
+If pg800 recieves PostgreSQL `interval` type, which has the `oid` 1186, it
+converts it into a Python `datetime.timedelta` object. But let's say we wanted
+to create our own Python class to be used instead of `datetime.timedelta`. Then
+we'd have to register an adapter:
+
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> class MyInterval(str):
+...     pass
+>>>
+>>> def my_interval_db_to_py(my_interval_str):  # The parameter is of type str
+...     return MyInterval(my_interval)
+>>>
+>>> con.register_db_to_py(1186, my_interval_db_to_py)
+>>> con.run("SELECT \'2 years'")
+[['2 years']]
+
+----
+
+Note that registering the 'in' adapter only afects the mapping from the
+PostgreSQL type to the Python type. See above for an example of how to change
+the mapping from PostgreSQL to Python.
+
+
+=== Could Not Determine Data Type Of Parameter
+
+Sometimes you'll get the 'could not determine data type of parameter' error
+message from the server:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("SELECT :v IS NULL", v=None)
+Traceback (most recent call last):
+pg8000.exceptions.DatabaseError: {'S': 'ERROR', 'V': 'ERROR', 'C': '42P18', 'M': 'could not determine data type of parameter $1', 'F': 'postgres.c', 'L': '...', 'R': 'exec_parse_message'}
+
+----
+
+One way of solving it is to put a `cast` in the SQL:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("SELECT cast(:v as TIMESTAMP) IS NULL", v=None)
+[[True]]
+
+----
+
+Another way is to override the type that pg8000 sends along with each
+parameter:
+
+[source,python]
+----
+>>> import facata
+>>> import pg8000.native
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("SELECT :v IS NULL", v=None, types={'v': pg8000.native.TIMESTAMP})
+[[True]]
+
+----
+
+
+=== Prepared Statements
+
+https://www.postgresql.org/docs/current/sql-prepare.html[Prepared statements]
+can be useful in improving performance when you have a statement that's
+executed repeatedly. Here's an example:
+
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> # Create the prepared statement
+>>> ps = con.prepare("SELECT cast(:v as varchar)")
+>>>
+>>> # Exceute the statement repeatedly
+>>> ps.run(v="speedy")
+[['speedy']]
+>>> ps.run(v="rapid")
+[['rapid']]
+>>> ps.run(v="swift")
+[['swift']]
+>>>
+>>> # Close the prepared statement, releasing resources on the server
+>>> ps.close()
+
+----
+
+
+=== Use Environment Variables As Connection Defaults
+
+You might want to use the current user as the database username for example:
+
+[source,python]
+----
+import getpass
+import facata
+
+# Connect to the database with current user name
+user = getpass.getuser()
+conection = facata.connect("postgresql", "pg8000", user=user, password="pw")
+
+connection.run("SELECT 'pilau'")
+
+----
+
+or perhaps you may want to use some of the same
+https://www.postgresql.org/docs/current/libpq-envars.html[environment variables
+that libpq uses]:
+
+[source,python]
+----
+>>> import facata
+>>> from os import environ
+>>>
+>>> user = environ.get('PGUSER', 'postgres')
+>>> password = environ.get('PGPASSWORD', 'pw')
+>>> host = environ.get('PGHOST', 'localhost')
+>>> port = environ.get('PGPORT', '5432')
+>>> dbname = environ.get('PGDATABASE')
+>>>
+>>> conection = facata.connect(
+...    "postgresql", "pg8000", user=user, password=password, host=host, port=port,
+...    dbname=dbname)
+>>>
+>>> connection.run("SELECT 'Mr Cairo'")
+[['Mr Cairo']]
+
+----
+
+It might be asked, why doesn't Facata have this behaviour built in? The thinking
+follows the second aphorism of
+https://www.python.org/dev/peps/pep-0020/[The Zen of Python]:
+
+[quote]
+Explicit is better than implicit.
+
+So we've taken the approach of only being able to set connection parameters using the
+`facata.connect()` function.
+
+
+=== Connect To PostgreSQL Over SSL
+
+To connect to the server using SSL defaults do:
+
+[source,python]
+----
+
+from facata import connect
+
+
+connection = connect(
+    "postgresql", "pg8000", user="postgres", password="cpsnow", ssl_context=True)
+connection.run("SELECT 'The game is afoot!'")
+
+----
+
+To connect over SSL with custom settings, set the `ssl_context` parameter to
+an https://docs.python.org/3/library/ssl.html#ssl.SSLContext[`ssl.SSLContext`]
+object:
+
+[source,python]
+----
+
+from facata import connect
+import ssl
+
+
+ssl_context = ssl.SSLContext()
+ssl_context.verify_mode = ssl.CERT_REQUIRED
+ssl_context.load_verify_locations('root.pem')        
+connection = connect(
+    "postgresql", "pg8000", user="postgres", password="cpsnow", ssl_context=ssl_context)
+
+----
+
+It may be that your PostgreSQL server is behind an SSL proxy server in which
+case you can set a pg8000-specific attribute
+`ssl.SSLContext.request_ssl = False` which tells pg8000 to connect using an
+SSL socket, but not to request SSL from the PostgreSQL server:
+
+[source,python]
+----
+
+from facata import connect
+import ssl
+
+
+ssl_context = ssl.SSLContext()
+ssl_context.request_ssl = False
+connection = connect(
+    "postgresql", "pg8000", user="postgres", password="cpsnow", ssl_context=ssl_context)
+
+----
+
+
+=== Server-Side Cursors
+
+You can use the SQL commands
+https://www.postgresql.org/docs/current/sql-declare.html[`DECLARE`],
+https://www.postgresql.org/docs/current/sql-fetch.html[`FETCH`],
+https://www.postgresql.org/docs/current/sql-move.html[`MOVE`] and
+https://www.postgresql.org/docs/current/sql-close.html[`CLOSE`] to manipulate
+server-side cursors. For example:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> con.run("START TRANSACTION")
+>>> con.run("DECLARE c SCROLL CURSOR FOR SELECT * FROM generate_series(1, 100)")
+>>> con.run("FETCH FORWARD 5 FROM c")
+[[1], [2], [3], [4], [5]]
+>>>
+>>> con.run("MOVE FORWARD 50 FROM c")
+>>> con.run("FETCH BACKWARD 10 FROM c")
+[[54], [53], [52], [51], [50], [49], [48], [47], [46], [45]]
+>>>
+>>> con.run("CLOSE c")
+>>> con.run("ROLLBACK")
+
+----
+
+
+=== BLOBs (Binary Large Objects)
+
+There's a set of
+https://www.postgresql.org/docs/current/lo-funcs.html[SQL functions]
+for manipulating BLOBs. Here's an example:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
+>>>
+>>> # Create a BLOB and get its oid
+>>> data = b'hello'
+>>> res = con.run("SELECT lo_from_bytea(0, :data)", data=data)
+>>> oid = res[0][0]
+>>>
+>>> # Create a table and store the oid of the BLOB
+>>> con.run("CREATE TEMPORARY TABLE image (raster oid)")
+>>> con.run("INSERT INTO image (raster) VALUES (:oid)", oid=oid)
+>>> # Retrieve the data using the oid
+>>> con.run("SELECT lo_get(:oid)", oid=oid)
+[[b'hello']]
+>>>
+>>> # Add some data to the end of the BLOB
+>>> more_data = b' all'
+>>> offset = len(data)
+>>> con.run(
+...     "SELECT lo_put(:oid, :offset, :data)",
+...     oid=oid, offset=offset, data=more_data)
+[['']]
+>>> con.run("SELECT lo_get(:oid)", oid=oid)
+[[b'hello all']]
+>>>
+>>> # Download a part of the data
+>>> con.run("SELECT lo_get(:oid, 6, 3)", oid=oid)
+[[b'all']]
+
+----
 
 
 === Connecting to a PostgreSQL database with psycopg2
@@ -64,16 +1114,658 @@ version, but for production use see the
 https://www.psycopg.org/docs/install.html[psycopg installation docs]. Then connect to a
 database as follows:
 
-```
+[source,python]
+----
 >>> import facata
 >>>
 >>> with facata.connect(
-...         "postgresql", "psycopg2", username="postgres", password="pw",
+...         "postgresql", "psycopg2", user="postgres", password="pw",
 ...         host="localhost") as con:
 ...     con.run("SELECT 'Hello'")
 [('Hello',)]
 
-```
+----
+
+
+=== Basic Example
+
+Import `facacta`, connect to the database, create a table, add some rows and then
+query the table:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> # Connect to the database with user name postgres
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> # Create a temporary table
+>>>
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> # Populate the table
+>>>
+>>> for title in ("Ender's Game", "The Magus"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> # Print all the rows in the table
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+(1, "Ender's Game")
+(2, 'The Magus')
+
+----
+
+
+=== Transactions
+
+Here's how to run groups of SQL statements in a
+https://www.postgresql.org/docs/current/tutorial-transactions.html[transaction]:
+
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run("START TRANSACTION")
+>>>
+>>> # Create a temporary table
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> for title in ("Ender's Game", "The Magus", "Phineas Finn"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> con.run("COMMIT")
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+(1, "Ender's Game")
+(2, 'The Magus')
+(3, 'Phineas Finn')
+
+----
+
+rolling back a transaction:
+
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> # Create a temporary table
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> for title in ("Ender's Game", "The Magus", "Phineas Finn"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> con.run("START TRANSACTION")
+>>>
+>>> con.run("DELETE FROM book WHERE title = :title", title="Phineas Finn") 
+>>>
+>>> con.run("ROLLBACK")
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+(1, "Ender's Game")
+(2, 'The Magus')
+(3, 'Phineas Finn')
+
+----
+
+
+=== Query Using Fuctions
+
+Another query, using some PostgreSQL functions:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run("SELECT extract(millennium from now())")
+[(3.0,)]
+
+----
+
+
+=== Interval Type
+
+A query that returns the PostgreSQL interval type:
+
+[source,python]
+----
+>>> import datetime
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> ts = datetime.date(1980, 4, 27)
+>>> con.run("SELECT timestamp '2013-12-01 16:06' - :ts", ts=ts)
+[(datetime.timedelta(days=12271, seconds=57960),)]
+
+----
+
+
+=== Point Type
+
+A round-trip with a
+https://www.postgresql.org/docs/current/datatype-geometric.html[PostgreSQL
+point] type:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run("SELECT CAST(:pt as point)", pt='(2.3,1)')
+[('(2.3,1)',)]
+
+----
+
+
+=== Client Encoding
+
+When communicating with the server, psycopg2 uses the character set that the
+server asks it to use (the client encoding). By default the client encoding is
+the database's character set (chosen when the database is created), but the
+client encoding can be changed in a number of ways (eg. setting
+CLIENT_ENCODING in postgresql.conf). Another way of changing the client
+encoding is by using an SQL command. For example:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run("SET CLIENT_ENCODING TO 'UTF8'")
+>>>
+>>> con.run("SHOW CLIENT_ENCODING")
+[('UTF8',)]
+
+----
+
+
+=== Retrieve Column Metadata From Results
+
+Find the column metadata returned from a query:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run("create temporary table quark (id serial, name text)")
+>>>
+>>> for name in ('Up', 'Down'):
+...     con.run("INSERT INTO quark (name) VALUES (:name)", name=name)
+>>>
+>>> # Now execute the query
+>>>
+>>> con.run("SELECT * FROM quark")
+[(1, 'Up'), (2, 'Down')]
+>>>
+>>> # and retried the metadata
+>>>
+>>> con.columns
+[{'name': 'id', 'type_code': 23, 'display_size': None, 'internal_size': 4, 'precision': None, 'scale': None}, {'name': 'name', 'type_code': 25, 'display_size': None, 'internal_size': -1, 'precision': None, 'scale': None}]
+>>>
+>>> # Show just the column names
+>>>
+>>> [c['name'] for c in con.columns]
+['id', 'name']
+
+----
+
+
+=== Notices, Notifications And Parameter Statuses
+
+To access the PostgreSQL https://www.postgresql.org/docs/current/static/plpgsql-errors-and-messages.html[notices]
+you need to obtain the underlying pg8000 connection. The notices are stored in a deque
+called `Connection.notices` and added using the `append()` method. Similarly there are `Connection.notifications` for
+https://www.postgresql.org/docs/current/static/sql-notify.html[notifications]
+and `Connection.parameter_statuses` for changes to the server configuration. Here's an
+example:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run("LISTEN aliens_landed")
+>>> con.run("NOTIFY aliens_landed")
+>>>
+>>> # A notification is a tuple containing (backend_pid, channel, payload)
+>>>
+>>> connection = con.connection
+>>> connection.notifies[0]
+Notify(..., 'aliens_landed', '')
+
+----
+
+
+=== LIMIT ALL
+
+You might think that the following would work, but in fact it fails:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run("SELECT 'silo 1' LIMIT :lim", lim='ALL')
+Traceback (most recent call last):
+psycopg2.errors.InvalidTextRepresentation: ...
+
+----
+
+Instead the https://www.postgresql.org/docs/current/sql-select.html[docs say]
+that you can send `null` as an alternative to `ALL`, which does work:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run("SELECT 'silo 1' LIMIT :lim", lim=None)
+[('silo 1',)]
+
+----
+
+
+=== COPY From And To A File
+
+The SQL https://www.postgresql.org/docs/current/sql-copy.html[COPY] statement
+can be used to copy from and to a file or file-like object. First we need to obtain the
+underlying Psycopg2 connection. Here' an example using the CSV format:
+
+[source,python]
+----
+
+>>> from io import StringIO
+>>> import csv
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> # Create a CSV file in memory
+>>>
+>>> stream_in = StringIO()
+>>> csv_writer = csv.writer(stream_in)
+>>> csv_writer.writerow([1, "electron"])
+12
+>>> csv_writer.writerow([2, "muon"])
+8
+>>> csv_writer.writerow([3, "tau"])
+7
+>>> stream_in.seek(0)
+0
+>>>
+>>> # Create a table and then copy the CSV into it
+>>>
+>>> con.run("CREATE TEMPORARY TABLE lepton (id SERIAL, name TEXT)")
+>>>
+>>> cur = con.connection.cursor()
+>>> cur.copy_expert("COPY lepton FROM STDIN WITH (FORMAT CSV)", stream_in)
+>>>
+>>> # COPY from a table to a stream
+>>>
+>>> stream_out = StringIO()
+>>> cur.copy_expert("COPY lepton TO STDOUT WITH (FORMAT CSV)", stream_out)
+>>> stream_out.seek(0)
+0
+>>> for row in csv.reader(stream_out):
+...     print(row)
+['1', 'electron']
+['2', 'muon']
+['3', 'tau']
+
+----
+
+
+=== Execute Multiple SQL Statements
+
+If you want to execute a series of SQL statements (eg. an `.sql` file), you
+can run them as expected:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> statements = "SELECT 5; SELECT 'Erich Fromm';"
+>>>
+>>> con.run(statements)
+[('Erich Fromm',)]
+
+----
+
+The only caveat is that when executing multiple statements you can't have any
+parameters.
+
+
+=== Quoted Identifiers in SQL
+
+Say you had a column called `My Column`. Since it's case sensitive and
+contains a space, you'd have to
+https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERSdouble[surround it by double quotes]. But you can't do:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run("select 'hello' as "My Column"")
+Traceback (most recent call last):
+SyntaxError: invalid syntax
+
+----
+
+since Python uses double quotes to delimit string literals, so one solution is
+to use Python's
+https://docs.python.org/3/tutorial/introduction.html#strings[triple quotes]
+to delimit the string instead:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run('''select 'hello' as "My Column"''')
+[('hello',)]
+
+----
+
+
+=== Custom Adapter From A Python Type To A PostgreSQL Type
+
+Psycopg2 has a mapping from Python types to PostgreSQL types for when it needs to send
+SQL parameters to the server. The default mapping that comes with Psycopg2 is designed
+to work well in most cases, but you might want to add or replace the default mapping.
+
+A Python `datetime.timedelta` object is sent to the server as a PostgreSQL `interval`
+type,  which has the `oid` 1186. But let's say we wanted to create our own Python class
+to be sent as an `interval` type. Then we'd have to register an adapter:
+
+[source,python]
+----
+>>> import facata
+>>> from psycopg2.extensions import AsIs
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> class MyInterval(str):
+...     pass
+>>>
+>>> def my_interval_py_to_db(my_interval):
+...     return AsIs(f"'{my_interval}'")  # Must return a str
+>>>
+>>> con.register_py_to_db(MyInterval, None, my_interval_py_to_db)
+>>> con.run("SELECT cast(:interval as interval)", interval=MyInterval("2 hours"))
+[(datetime.timedelta(seconds=7200),)]
+
+----
+
+Note that it still came back as a `datetime.timedelta` object because we only
+changed the mapping from Python to PostgreSQL. See below for an example of how
+to change the mapping from PostgreSQL to Python.
+
+
+=== Custom adapter from a PostgreSQL type to a Python type
+
+Psycopg2 has a mapping from PostgreSQL types to Python types for when it receives
+SQL results from the server. The default mapping that comes with Psycopg2 is
+designed to work well in most cases, but you might want to add or replace the
+default mapping.
+
+If Psycopg2 recieves PostgreSQL `interval` type, which has the `oid` 1186, it
+converts it into a Python `datetime.timedelta` object. But let's say we wanted
+to create our own Python class to be used instead of `datetime.timedelta`. Then
+we'd have to register an adapter:
+
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> class MyInterval(str):
+...     pass
+>>>
+>>> def my_interval_db_to_py(my_interval_str, cur):  # The parameter is of type str
+...     return MyInterval(my_interval_str)
+>>>
+>>> con.register_db_to_py(1186, my_interval_db_to_py)
+>>> con.run("SELECT cast('2 years' as interval)")
+[('2 years',)]
+
+----
+
+Note that registering the 'in' adapter only afects the mapping from the
+PostgreSQL type to the Python type. See above for an example of how to change
+the mapping from PostgreSQL to Python.
+
+
+=== Prepared Statements
+
+https://www.postgresql.org/docs/current/sql-prepare.html[Prepared statements] aren't
+currently supported by Psycopg2, so the Facata just defaults to standard execution
+behind the scenes:
+
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> # Create the prepared statement
+>>> ps = con.prepare("SELECT cast(:v as varchar)")
+>>>
+>>> # Exceute the statement repeatedly
+>>> ps.run(v="speedy")
+[('speedy',)]
+>>> ps.run(v="rapid")
+[('rapid',)]
+>>> ps.run(v="swift")
+[('swift',)]
+>>>
+>>> # Close the prepared statement, releasing resources on the server
+>>> ps.close()
+
+----
+
+
+=== Use Environment Variables As Connection Defaults
+
+You might want to use the current user as the database username for example:
+
+[source,python]
+----
+import getpass
+import facata
+
+# Connect to the database with current user name
+user = getpass.getuser()
+con = facata.connect(
+    "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+
+con.run("SELECT 'pilau'")
+
+----
+
+or perhaps you may want to use some of the same
+https://www.postgresql.org/docs/current/libpq-envars.html[environment variables
+that libpq uses]:
+
+[source,python]
+----
+>>> import facata
+>>> from os import environ
+>>>
+>>> user = environ.get('PGUSER', 'postgres')
+>>> password = environ.get('PGPASSWORD', 'pw')
+>>> host = environ.get('PGHOST', 'localhost')
+>>> port = environ.get('PGPORT', '5432')
+>>> dbname = environ.get('PGDATABASE')
+>>>
+>>> connection = facata.connect(
+...    "postgresql", "psycopg2", user=user, password=password, host=host, port=port,
+...    dbname=dbname)
+>>>
+>>> connection.run("SELECT 'Mr Cairo'")
+[('Mr Cairo',)]
+
+----
+
+It might be asked, why doesn't Facata have this behaviour built in? The thinking
+follows the second aphorism of
+https://www.python.org/dev/peps/pep-0020/[The Zen of Python]:
+
+[quote]
+Explicit is better than implicit.
+
+So we've taken the approach of only being able to set connection parameters using the
+`facata.connect()` function.
+
+
+=== Connect To PostgreSQL Over SSL
+
+To connect to the server using SSL defaults do:
+
+[source,python]
+----
+
+from facata import connect
+
+
+connection = connect(
+    "postgresql", "psycopg2", user="postgres", password="cpsnow", sslmode='require')
+connection.run("SELECT 'The game is afoot!'")
+
+----
+
+To connect over SSL with custom settings, use the
+https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-PARAMKEYWORDS[libpq parameters]:
+
+[source,python]
+----
+
+from facata import connect
+import ssl
+
+
+connection = connect(
+    "postgresql", "psycopg2", user="postgres", password="cpsnow",
+    sslmode="verify-full", sslrootcert="root.pem")
+
+----
+
+
+=== Server-Side Cursors
+
+You can use the SQL commands
+https://www.postgresql.org/docs/current/sql-declare.html[`DECLARE`],
+https://www.postgresql.org/docs/current/sql-fetch.html[`FETCH`],
+https://www.postgresql.org/docs/current/sql-move.html[`MOVE`] and
+https://www.postgresql.org/docs/current/sql-close.html[`CLOSE`] to manipulate
+server-side cursors. For example:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> con.run("START TRANSACTION")
+>>> con.run("DECLARE c SCROLL CURSOR FOR SELECT * FROM generate_series(1, 100)")
+>>> con.run("FETCH FORWARD 5 FROM c")
+[(1,), (2,), (3,), (4,), (5,)]
+>>>
+>>> con.run("MOVE FORWARD 50 FROM c")
+>>> con.run("FETCH BACKWARD 10 FROM c")
+[(54,), (53,), (52,), (51,), (50,), (49,), (48,), (47,), (46,), (45,)]
+>>>
+>>> con.run("CLOSE c")
+>>> con.run("ROLLBACK")
+
+----
+
+
+=== BLOBs (Binary Large Objects)
+
+There's a set of
+https://www.postgresql.org/docs/current/lo-funcs.html[SQL functions]
+for manipulating BLOBs. Here's an example:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
+>>>
+>>> # Create a BLOB and get its oid
+>>> data = b'hello'
+>>> res = con.run("SELECT lo_from_bytea(0, :data)", data=data)
+>>> oid = res[0][0]
+>>>
+>>> # Create a table and store the oid of the BLOB
+>>> con.run("CREATE TEMPORARY TABLE image (raster oid)")
+>>> con.run("INSERT INTO image (raster) VALUES (:oid)", oid=oid)
+>>> # Retrieve the data using the oid
+>>> result = con.run("SELECT lo_get(:oid)", oid=oid)
+>>> bytes(result[0][0])
+b'hello'
+>>>
+>>> # Add some data to the end of the BLOB
+>>> more_data = b' all'
+>>> offset = len(data)
+>>> con.run(
+...     "SELECT lo_put(:oid, :offset, :data)",
+...     oid=oid, offset=offset, data=more_data)
+[('',)]
+>>> result = con.run("SELECT lo_get(:oid)", oid=oid)
+>>> bytes(result[0][0])
+b'hello all'
+>>>
+>>> # Download a part of the data
+>>> result = con.run("SELECT lo_get(:oid, 6, 3)", oid=oid)
+>>> bytes(result[0][0])
+b'all'
+
+----
 
 
 === Connecting to a MariaDB database with the mariadb driver
@@ -85,162 +1777,522 @@ https://mariadb.com/docs/clients/mariadb-connectors/connector-c/install/[Connect
 to be installed, and then the dependency `mariadb` can be installed
 by doing `pip install facata[mariadb]`.
 
-```
+[source,python]
+----
 >>> import facata
 >>>
 >>> with facata.connect(
-...         "mariadb", "mariadb", username="root", password="pw",
-...         host="127.0.0.1", port=3306) as con:
+...         "mariadb", "mariadb", user="root", password="pw", host="127.0.0.1",
+...         port=3306, dbname="mysql") as con:
 ...     con.run("SELECT 'Hello'")
 [('Hello',)]
 
-```
+----
 
+=== Basic Example
 
-=== Parameterized SQL
+Connect to the database, create a table, add some rows and then query the table:
 
-
-```
+[source,python]
+----
 >>> import facata
 >>>
->>> con = facata.connect("sqlite", "sqlite3", dbname=":memory:")
->>> con.run("SELECT :value", value=1)
-[(1,)]
->>> con.close()
+>>> con = facata.connect(
+...     "mariadb", "mariadb", user="root", password="pw", host="127.0.0.1", port=3306,
+...     dbname="mysql")
+>>>
+>>> # Create a temporary table
+>>>
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> # Populate the table
+>>>
+>>> for title in ("Ender's Game", "The Magus"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> # Print all the rows in the table
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+(1, "Ender's Game")
+(2, 'The Magus')
 
-```
+----
+
+
+=== Transactions
+
+Here's how to run groups of SQL statements in a
+https://mariadb.com/kb/en/start-transaction/[transaction]:
+
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mariadb", "mariadb", user="root", password="pw", host="127.0.0.1", port=3306,
+...     dbname="mysql")
+>>>
+>>> con.run("START TRANSACTION")
+>>>
+>>> # Create a temporary table
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> for title in ("Ender's Game", "The Magus", "Phineas Finn"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>> con.run("COMMIT")
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+(1, "Ender's Game")
+(2, 'The Magus')
+(3, 'Phineas Finn')
+
+----
+
+rolling back a transaction:
+
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mariadb", "mariadb", user="root", password="pw", host="127.0.0.1", port=3306,
+...     dbname="mysql")
+>>>
+>>> # Create a temporary table
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> for title in ("Ender's Game", "The Magus", "Phineas Finn"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> con.run("START TRANSACTION")
+>>> con.run("DELETE FROM book WHERE title = :title", title="Phineas Finn") 
+>>> con.run("ROLLBACK")
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+(1, "Ender's Game")
+(2, 'The Magus')
+(3, 'Phineas Finn')
+
+----
+
+
+=== Query Using Fuctions
+
+Another query, using a MariaDB function:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mariadb", "mariadb", user="root", password="pw", host="127.0.0.1", port=3306)
+>>>
+>>> con.run("SELECT GREATEST(0, -3, 2)")
+[(2,)]
+
+----
+
+
+=== Point Type
+
+A round-trip with a https://mariadb.com/kb/en/point/[MariaDB point] type:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mariadb", "mariadb", user="root", password="pw", host="127.0.0.1", port=3306,
+...     dbname="mysql")
+>>>
+>>> con.run("SELECT AsText(PointFromText(:pt))", pt='POINT(2.3 1)')
+[('POINT(2.3 1)',)]
+
+----
+
+
+=== Retrieve Column Metadata From Results
+
+Find the column metadata returned from a query:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mariadb", "mariadb", user="root", password="pw", host="127.0.0.1", port=3306,
+...     dbname="mysql")
+>>>
+>>> con.run("create temporary table quark (id serial, name text)")
+>>> for name in ('Up', 'Down'):
+...     con.run("INSERT INTO quark (name) VALUES (:name)", name=name)
+>>> # Now execute the query
+>>>
+>>> con.run("SELECT * FROM quark")
+[(1, 'Up'), (2, 'Down')]
+>>>
+>>> # and retried the metadata
+>>>
+>>> con.columns
+[{'name': 'id', 'type_code': 8, 'display_size': 5, 'internal_size': 20, 'precision': 0, 'scale': 0}, {'name': 'name', 'type_code': 252, 'display_size': 65535, 'internal_size': 262140, 'precision': 0, 'scale': 0}]
+>>>
+>>> # Show just the column names
+>>>
+>>> [c['name'] for c in con.columns]
+['id', 'name']
+
+
+
+----
+
+
+=== Load Data From A File
+
+The SQL https://mariadb.com/kb/en/load-data-infile/[LOAD DATA INFILE] statement
+can be used to copy from a file. Here' an example:
+
+[source,python]
+----
+
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mariadb", "mariadb", user="root", password="pw", host="127.0.0.1", port=3306,
+...     dbname="mysql")
+>>>
+>>> # Open and display a pre-prepared file
+>>>
+>>> with open('test/mariadb/data.dat') as f:
+...     f.read()
+'\telectron\n\tmuon\n\ttau\n'
+>>>
+>>> # Create a table and populate it
+>>>
+>>> con.run("CREATE TEMPORARY TABLE lepton (id SERIAL, name TEXT)")
+>>> con.run("LOAD DATA LOCAL INFILE 'test/mariadb/data.dat' INTO TABLE lepton")
+>>>
+>>> con.run("SELECT * FROM lepton")
+[(1, 'electron'), (2, 'muon'), (3, 'tau')]
+
+----
+
+
+=== Quoted Identifiers in SQL
+
+Say you had a column called `My Column`. Since it's case sensitive and
+contains a space, you'd have to
+https://mariadb.com/kb/en/identifier-names/[surround it by backticks]. But you can't do:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mariadb", "mariadb", user="root", password="pw", host="127.0.0.1", port=3306)
+>>>
+>>> con.run("select 'hello' as `My Column`")
+[('hello',)]
+
+----
+
+
+=== Connect To MariaDB Over SSL
+
+To connect to the server using SSL do something like:
+
+[source,python]
+----
+
+import facata
+
+con = facata.connect(
+    "mariadb", "mariadb", user="root", password="pw", host="127.0.0.1", port=3306,
+    ssl_ca='ca-cert.pem', ssl_cert='client-cert.pem', ssl_key='client-key.pem')
+
+con.run("SELECT 'The game is afoot!'")
+
+----
+
+
+== Examples For MySQL With MySQL Connector/Python
+
+=== Connecting to a database
+
+
+Connecting to https://www.mysql.com/[MySQL] with the
+https://dev.mysql.com/doc/connectors/en/connector-python.html[MySQL Connector] driver
+requires the dependency `mysql-connector` to be installed by doing
+`pip install facata[mysql-connector]`. Then connect to a database as follows:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> with facata.connect(
+...         "mysql", "mysql-connector", user="root", password="pw", dbname="mysql",
+...         host="127.0.0.1", port=3305) as con:
+...     con.run("SELECT 'Hello'")
+[('Hello',)]
+
+----
+
+
+=== Basic Example
+
+Connect to the database, create a table, add some rows and then query the table:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mysql", "mysql-connector", user="root", password="pw", host="127.0.0.1",
+...     port=3305, dbname="mysql")
+>>>
+>>> # Create a temporary table
+>>>
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> # Populate the table
+>>>
+>>> for title in ("Ender's Game", "The Magus"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> # Print all the rows in the table
+>>>
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+(1, "Ender's Game")
+(2, 'The Magus')
+
+----
+
+
+=== Transactions
+
+Here's how to run groups of SQL statements in a
+https://www.postgresql.org/docs/current/tutorial-transactions.html[transaction]:
+
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mysql", "mysql-connector", user="root", password="pw", host="127.0.0.1",
+...     port=3305, dbname="mysql")
+>>>
+>>> con.run("START TRANSACTION")
+>>>
+>>> # Create a temporary table
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> for title in ("Ender's Game", "The Magus", "Phineas Finn"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>> con.run("COMMIT")
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+(1, "Ender's Game")
+(2, 'The Magus')
+(3, 'Phineas Finn')
+
+----
+
+rolling back a transaction:
+
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mysql", "mysql-connector", user="root", password="pw", host="127.0.0.1",
+...     port=3305, dbname="mysql")
+>>>
+>>> # Create a temporary table
+>>> con.run("CREATE TEMPORARY TABLE book (id SERIAL, title TEXT)")
+>>>
+>>> for title in ("Ender's Game", "The Magus", "Phineas Finn"):
+...     con.run("INSERT INTO book (title) VALUES (:title)", title=title)
+>>>
+>>> con.run("START TRANSACTION")
+>>> con.run("DELETE FROM book WHERE title = :title", title="Phineas Finn") 
+>>> con.run("ROLLBACK")
+>>> for row in con.run("SELECT * FROM book"):
+...     print(row)
+(1, "Ender's Game")
+(2, 'The Magus')
+(3, 'Phineas Finn')
+
+----
+
+
+=== Query Using Fuctions
+
+Another query, using some MySQL functions:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mysql", "mysql-connector", user="root", password="pw", host="127.0.0.1",
+...     port=3305, dbname="mysql")
+>>>
+>>> con.run("SELECT GREATEST(0, -3, 2)")
+[(2,)]
+
+----
+
+
+=== Point Type
+
+A round-trip with a
+https://dev.mysql.com/doc/refman/8.0/en/spatial-type-overview.html[MySQL point] type:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mysql", "mysql-connector", user="root", password="pw", host="127.0.0.1",
+...     port=3305, dbname="mysql")
+>>>
+>>> con.run("SELECT ST_AsText(ST_GeomFromText(:pt))", pt='POINT(2.3 1)')
+[('POINT(2.3 1)',)]
+
+----
+
+
+=== Retrieve Column Metadata From Results
+
+Find the column metadata returned from a query:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mysql", "mysql-connector", user="root", password="pw", host="127.0.0.1",
+...     port=3305, dbname="mysql")
+>>>
+>>> con.run("create temporary table quark (id serial, name text)")
+>>> for name in ('Up', 'Down'):
+...     con.run("INSERT INTO quark (name) VALUES (:name)", name=name)
+>>> # Now execute the query
+>>>
+>>> con.run("SELECT * FROM quark")
+[(1, 'Up'), (2, 'Down')]
+>>>
+>>> # and retried the metadata
+>>>
+>>> con.columns
+[{'name': 'id', 'type_code': 8, 'display_size': None, 'internal_size': None, 'precision': None, 'scale': None}, {'name': 'name', 'type_code': 252, 'display_size': None, 'internal_size': None, 'precision': None, 'scale': None}]
+>>>
+>>> # Show just the column names
+>>>
+>>> [c['name'] for c in con.columns]
+['id', 'name']
+
+----
+
+
+=== Quoted Identifiers in SQL
+
+Say you had a column called `My Column`. Since it's case sensitive and
+contains a space, you'd have to
+https://dev.mysql.com/doc/refman/8.0/en/identifiers.html[surround it by backticks]:
+
+[source,python]
+----
+>>> import facata
+>>>
+>>> con = facata.connect(
+...     "mysql", "mysql-connector", user="root", password="pw", host="127.0.0.1",
+...     port=3305, dbname="mysql")
+>>>
+>>> con.run("select 'hello' as `My Column`")
+[('hello',)]
+
+----
+
+
+=== Connect To MySQL Over SSL
+
+To connect to the server using SSL do:
+
+[source,python]
+----
+import facata
+from mysql.connector.constants import ClientFlag
+
+
+con = facata.connect(
+    "mysql", "mysql-connector", user="root", password="pw", host="127.0.0.1",
+    port=3305, dbname="mysql", client_flags=[ClientFlag.SSL],
+    ssl_ca='/opt/mysql/ssl/ca.pem', ssl_cert='/opt/mysql/ssl/client-cert.pem',
+    ssl_key='/opt/mysql/ssl/client-key.pem')
+
+con.run("SELECT 'The game is afoot!'")
+
+----
+
+
 
 == API Docs
 
 
-=== scramp.MECHANISMS
+=== facata.connect()
 
-A tuple of the supported mechanism names.
+`connect(dbms, driver, dbname=None, user=None, password=None, host=None, port=None,
+**params)`::
+  Returns a new `facata.Connection` representing a connection to the database.
+  Connections aren't threadsafe.
 
-
-=== scramp.ScramClient
-
-`ScramClient(mechanisms, username, password, channel_binding=None,
-c_nonce=None)`::
-  Constructor of the `ScramClient` class, with the following parameters:
-  `mechanisms`:::
-    A list or tuple of mechanism names. ScramClient will choose the most
-    secure. If `cbind_data` is `None`, the '-PLUS' variants will be filtered
-    out first. The chosen mechanism is available as the property
-    `mechanism_name`.
-  `username`:::
+  `dbms`:::
+    Name of DBMS. Can be `mariadb`, `postgresql` or `sqlite`.
+  `driver`:::
+    The name of a driver for the DBMS. The possible drivers for each DBMS are:
+    * `mariadb`: (`mariadb`)
+    * `postgresql`: (`pg80000`, `psycopg2`)
+    * `sqlite`: (`sqlite3`)
+  `dbname`:::
+    Name of the database to connect to.
+  `user`:::
+    User name.
   `password`:::
-  `channel_binding`:::
-    Providing a value for this parameter allows channel binding to be used (ie.
-    it lets you use mechanisms ending in '-PLUS'). The value for
-    `channel_binding` is a tuple consisting of the channel binding name and
-    the channel binding data. For example, if the channel binding name is
-    'tls-unique', the `channel_binding` parameter would be
-    `('tls-unique', data)`, where `data` is obtained by calling
-    https://docs.python.org/3/library/ssl.html#ssl.SSLSocket.get_channel_binding[SSLSocket.get_channel_binding()].
-  `c_nonce`:::
-    The client nonce. It's sometimes useful to set this when testing /
-    debugging, but in production this should be omitted, in which case
-    `ScramClient` will generate a client nonce.
-
-The `ScramClient` object has the following methods and properties:
-
-`get_client_first()`::
-  Get the client first message.
-`set_server_first(message)`::
-    Set the first message from the server.
-`get_client_final()`::
-  Get the final client message.
-`set_server_final(message)`::
-  Set the final message from the server.
-`mechanism_name`::
-  The mechanism chosen from the list given in the constructor.
+    Password of the user.
+  `host`:::
+    Hostname
+  `port`:::
+    Port number.
+  `params`:::
+    Dictionary of parameters to be given as keyword arguments to the underlying driver.
 
 
+=== facata.Connection
 
-=== scramp.ScramMechanism
+A `facata.Connection` object has the following methods and properties:
 
-`ScramMechanism(mechanism='SCRAM-SHA-256')`::
-  Constructor of the `ScramMechanism` class, with the following parameter:
-  `mechanism`:::
-    The SCRAM mechanism to use.
-
-The `ScramMechanism` object has the following methods and properties:
-
-`make_auth_info(password, iteration_count=None, salt=None)`::
-  returns the tuple `(salt, stored_key, server_key, iteration_count)` which is
-  stored in the authentication database on the server side. It has the
-  following parameters:
-  `password`:::
-    The user's password as a `str`.
-  `iteration_count`:::
-    The rounds as an `int`. If `None` then use the minimum associated with the
-    mechanism.
-  `salt`:::
-    It's sometimes useful to set this binary parameter when testing /
-    debugging, but in production this should be omitted, in which case a salt
-    will be generated.
-
-`make_server(auth_fn, channel_binding=None, s_nonce=None)`::
-    returns a `ScramServer` object. It takes the following parameters:
-
-  `auth_fn`:::
-    This is a function provided by the programmer that has one parameter, a
-    username of type `str` and returns returns the tuple
-    `(salt, stored_key, server_key, iteration_count)`. Where `salt`,
-    `stored_key` and `server_key` are of a binary type, and `iteration_count`
-    is an `int`.
-  `channel_binding`:::
-    Providing a value for this parameter allows channel binding to be used (ie.
-    it lets you use mechanisms ending in '-PLUS'). The value for
-    `channel_binding` is a tuple consisting of the channel binding name and
-    the channel binding data. For example, if the channel binding name is
-    'tls-unique', the `channel_binding` parameter would be
-    `('tls-unique', data)`, where `data` is obtained by calling
-    https://docs.python.org/3/library/ssl.html#ssl.SSLSocket.get_channel_binding[SSLSocket.get_channel_binding()].
-  `s_nonce`:::
-    The server nonce as a `str`. It's sometimes useful to set this when testing
-    / debugging, but in production this should be omitted, in which case
-    `ScramServer` will generate a server nonce.
-
-`make_stored_server_keys(salted_password)`::
-    returns `(stored_key, server_key)` tuple of `bytes` objects given a salted
-    password. This is useful if you want to use a separate hashing
-    implementation from the one provided by Scramp. It takes the following
-    parameter:
-
-  `salted_password`:::
-    A binary object representing the hashed password.
-
-`iteration_count`::
-    The minimum iteration count recommended for this mechanism.
+`run(sql, **params)`::
+  Returns the result of executing the `sql` statement as a sequence of sequences (eg. a
+  `list` of `tuple`s) or `None` if the statement isn't one that can return results.
+  `sql`:::
+    The SQL statement as a `str` with any parameters written as a `:` followed by the
+    parameter name.
+  `params`:::
+    Parameter name / value pairs.
 
 
-=== scramp.ScramServer
+== Diferences From DBAPI 2
 
-The `ScramServer` object has the following methods:
+https://www.python.org/dev/peps/pep-0249/[DBAPI 2] is the Python standard for
+accessing SQL databases. Facata differs from DBAPI 2 in these ways:
 
-`set_client_first(message)`::
-  Set the first message from the client.
-`get_server_first()`::
-  Get the server first message.
-`set_client_final(message)`::
-  Set the final client message.
-`get_server_final()`::
-  Get the server final message.
-
-
-=== scramp.make_channel_binding()
-
-A helper function that makes a `channel_binding` tuple when given a channel
-binding name and an SSL socket. The parameters are:
-
-  `name`:::
-    A channel binding name such as 'tls-unique' or 'tls-server-end-point'.
-  `ssl_socket`:::
-    An instance of an
-    https://docs.python.org/3/library/ssl.html#ssl.SSLSocket[ssl socket].
-
+* DBAPI 2 has five ways of writing parameters in SQL, but Facata has just one.
+* In DAPI 2 parameter values can be provided as a sequence or mapping, but in Facata
+  parameter values are provided as keyword arguments.
+* DBAPI 2 has four levels of threadsafety, but Facata just has one.
+* DBAPI 2 has a 'cursor' object, but in Facata there is no `cursor` object and
+  statements are executed using the connection.
+* DBAPI 2 overrides the autocommit mode of the underlying database by silently
+  sending `START TRANSACTION` statements if a transaction isn't already in progress.
+  Facata never silently sends SQL statements.
 
 == Testing
 
@@ -249,14 +2301,14 @@ binding name and an SSL socket. The parameters are:
 * Run `tox`: `tox`
 
 
-== Doing A Release Of Scramp
+== Doing A Release Of Facata
 
 Run `tox` to make sure all tests pass, then update the release notes, then do:
 
 ```
 git tag -a x.y.z -m "version x.y.z"
 rm -r dist
-python setup.py sdist bdist_wheel --python-tag py3
+python setup.py sdist bdist_wheel
 for f in dist/*; do gpg --detach-sign -a $f; done
 twine upload dist/*
 ```
@@ -267,59 +2319,3 @@ twine upload dist/*
 === Version 1.4.0, 2021-03-28
 
 * Raise an exception if the client receives an error from the server.
-
-
-=== Version 1.3.0, 2021-03-28
-
-* As the specification allows, server errors are now sent to the client in the
-  `server_final` message, an exception is still thrown as before.
-
-
-=== Version 1.2.2, 2021-02-13
-
-* Fix bug in generating the AuthMessage. It was incorrect when channel binding
-  was used. So now Scramp supports channel binding.
-
-
-=== Version 1.2.1, 2021-02-07
-
-* Add support for channel binding.
-
-* Add support for SCRAM-SHA-512 and SCRAM-SHA3-512 and their channel binding
-  variants.
-
-
-=== Version 1.2.0, 2020-05-30
-
-* This is a backwardly incompatible change on the server side, the client side
-  will work as before. The idea of this change is to make it possible to have
-  an authentication database. That is, the authentication information can be
-  stored, and then retrieved when needed to authenticate the user.
-
-* In addition, it's now possible on the server side to use a third party
-  hashing library such as passlib as the hashing implementation.
-
-
-=== Version 1.1.1, 2020-03-28
-
-* Add the README and LICENCE to the distribution.
-
-
-=== Version 1.1.0, 2019-02-24
-
-* Add support for the SCRAM-SHA-1 mechanism.
-
-
-=== Version 1.0.0, 2019-02-17
-
-* Implement the server side as well as the client side.
-
-
-=== Version 0.0.0, 2019-02-10
-
-* Copied SCRAM implementation from https://github.com/tlocke/pg8000[pg8000].
-  The idea is to make it a general SCRAM implemtation. Credit to the
-  https://github.com/cagdass/scrampy[Scrampy] project which I read through to
-  help with this project. Also credit to the
-  https://github.com/efficks/passlib[passlib] project from which I copied the
-  `saslprep` function.
