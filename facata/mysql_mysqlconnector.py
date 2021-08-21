@@ -18,7 +18,7 @@ class MysqlMysqlConnectConnection(Connection):
 def connect(dbname, user, password, host, port, params):
     import mysql.connector
 
-    for param, paramname in ((port, "port"),):
+    for param, paramname in ((port, "port"), (host, "host")):
         if param is not None:
             params[paramname] = param
 

@@ -56,7 +56,6 @@ CONNECT_ARGS = {
             "user": "root",
             "password": "pw",
             "dbname": "mysql",
-            "host": "127.0.0.1",
             "port": 3305,
         },
     },
