@@ -1,6 +1,6 @@
 = Facata
 :toc: preamble
-:toclevels: 2
+:toclevels: 1
 
 A Python library that provides a simplified alternative to
 https://www.python.org/dev/peps/pep-0249/[DBAPI 2]. It provides a facade in front of
@@ -1105,7 +1105,9 @@ for manipulating BLOBs. Here's an example:
 ----
 
 
-=== Connecting to a PostgreSQL database with psycopg2
+== Examples For PostgreSQL With Psycopg2
+
+=== Connecting To A Database
 
 Connecting to https://www.postgresql.org/[PostgreSQL] with the
 https://www.psycopg.org/[psycopg2] driver requires the dependency `psycopg2` to be
@@ -1768,7 +1770,9 @@ b'all'
 ----
 
 
-=== Connecting to a MariaDB database with the mariadb driver
+== Examples For MariaDB With MariaDb Driver
+
+=== Connecting To A Database
 
 Connecting to https://mariadb.com/[MariaDB] with the
 https://mariadb.com/docs/clients/mariadb-connectors/connector-python/[mariadb] driver
@@ -2316,6 +2320,6 @@ twine upload dist/*
 
 == Release Notes
 
-=== Version 1.4.0, 2021-03-28
+=== Version 0.0.0, 2021-08-21
 
-* Raise an exception if the client receives an error from the server.
+* First release.
