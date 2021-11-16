@@ -18,7 +18,7 @@ def test_register_py_to_db():
         return str(dec)
 
     val = Decimal("0.1")
-    con.register_py_to_db(Decimal, None, decimal_py_to_db)
+    con.register_py_to_db(Decimal, decimal_py_to_db)
     result = con.run("SELECT :val", val=val)
     assert result == [(str(val),)]
 

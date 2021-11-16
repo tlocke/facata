@@ -54,8 +54,8 @@ def test_register_py_to_db(postgresql_pg8000_con):
     def my_interval_py_to_db(my_interval):
         return my_interval  # Must return a str
 
-    postgresql_pg8000_con.register_py_to_db(MyInterval, 1186, my_interval_py_to_db)
+    postgresql_pg8000_con.register_py_to_db(MyInterval, my_interval_py_to_db)
     result = postgresql_pg8000_con.run(
-        "SELECT :interval", interval=MyInterval("2 hours")
+        "SELECT CAST(:interval AS INTERVAL)", interval=MyInterval("2 hours")
     )
     assert result == [[Timedelta(seconds=7200)]]

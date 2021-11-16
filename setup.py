@@ -29,10 +29,10 @@ setup(
     python_requires=">=3.6",
     install_requires=[],
     extras_require={
-        "mariadb": "mariadb>=1.0.7",
-        "pg8000": "pg8000>=1.21.0",
-        "psycopg2": "psycopg2-binary>=2.9.1",
-        "mysql-connector": "mysql-connector-python>=8.0.26",
+        "mariadb": "mariadb>=1.0.8",
+        "pg8000": "pg8000>=1.23.0",
+        "psycopg2": "psycopg2-binary>=2.9.2",
+        "mysql-connector": "mysql-connector-python>=8.0.27",
     },
     classifiers=[
         "Development Status :: 3 - Alpha",
@@ -43,6 +43,8 @@ setup(
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: Implementation",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: Jython",

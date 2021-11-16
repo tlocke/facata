@@ -23,8 +23,8 @@ class PostgresqlPg8000Connection(Connection):
     def parameter_statuses(self):
         return self.con.parameter_statuses
 
-    def register_py_to_db(self, cls, type_code, adapter):
-        self.con.register_out_adapter(cls, type_code, adapter)
+    def register_py_to_db(self, cls, adapter):
+        self.con.register_out_adapter(cls, adapter)
 
     def register_db_to_py(self, type_code, adapter):
         self.con.register_in_adapter(type_code, adapter)

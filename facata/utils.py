@@ -32,7 +32,7 @@ class Connection(AbstractContextManager):
         self.cur.close()
         self.con.close()
 
-    def register_py_to_db(self, cls, type_code, adapter):
+    def register_py_to_db(self, cls, adapter):
         pass
 
     def register_db_to_py(self, type_code, adapter):

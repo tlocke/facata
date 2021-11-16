@@ -14,7 +14,7 @@ class PostgresqlPsycopg2Connection(Connection):
     def parameter_statuses(self):
         return []
 
-    def register_py_to_db(self, cls, type_code, adapter):
+    def register_py_to_db(self, cls, adapter):
         from psycopg2.extensions import register_adapter
 
         register_adapter(cls, adapter)

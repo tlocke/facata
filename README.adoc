@@ -261,7 +261,7 @@ an example of how to register an adapter for it:
 >>> def decimal_py_to_db(dec):
 ...     return str(dec)  # Must return int, float, str or bytes
 >>>
->>> con.register_py_to_db(Decimal, None, decimal_py_to_db)
+>>> con.register_py_to_db(Decimal, decimal_py_to_db)
 >>>
 >>> con.run("SELECT :val", val=Decimal('0.1'))
 [('0.1',)]
@@ -426,8 +426,8 @@ Another query, using some PostgreSQL functions:
 >>>
 >>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
 >>>
->>> con.run("SELECT extract(millennium from now())")
-[[3.0]]
+>>> con.run("SELECT TO_CHAR(TIMESTAMP '2021-10-10', 'YYYY BC')")
+[['2021 AD']]
 
 ----
 
@@ -504,7 +504,7 @@ then you can just do:
 >>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
 >>>
 >>> val = {'name': 'Apollo 11 Cave', 'zebra': True, 'age': 26.003}
->>> con.run("SELECT :apollo", apollo=val)
+>>> con.run("SELECT CAST(:apollo AS JSONB)", apollo=val)
 [[{'age': 26.003, 'name': 'Apollo 11 Cave', 'zebra': True}]]
 
 ----
@@ -642,7 +642,9 @@ function:
 >>>
 >>> con = facata.connect("postgresql", "pg8000", user="postgres", password="pw")
 >>>
->>> con.run("SELECT 'silo 1' WHERE 'a' IN (SELECT unnest(:v))", v=('a', 'b'))
+>>> con.run(
+...     "SELECT 'silo 1' WHERE 'a' IN (SELECT unnest(CAST(:v AS VARCHAR[])))",
+...     v=('a', 'b'))
 [['silo 1']]
 
 ----
@@ -788,9 +790,8 @@ pg8000 is designed to work well in most cases, but you might want to add or
 replace the default mapping.
 
 A Python `datetime.timedelta` object is sent to the server as a PostgreSQL
-`interval` type,  which has the `oid` 1186. But let's say we wanted to create
-our own Python class to be sent as an `interval` type. Then we'd have to
-register an adapter:
+`interval` type. But let's say we wanted to create our own Python class to be sent as
+an `interval` type. Then we'd have to register an adapter:
 
 [source,python]
 ----
@@ -804,8 +805,8 @@ register an adapter:
 >>> def my_interval_py_to_db(my_interval):
 ...     return my_interval  # Must return a str
 >>>
->>> con.register_py_to_db(MyInterval, 1186, my_interval_py_to_db)
->>> con.run("SELECT :interval", interval=MyInterval("2 hours"))
+>>> con.register_py_to_db(MyInterval, my_interval_py_to_db)
+>>> con.run("SELECT CAST(:interval AS INTERVAL)", interval=MyInterval("2 hours"))
 [[datetime.timedelta(seconds=7200)]]
 
 ----
@@ -1231,8 +1232,8 @@ Another query, using some PostgreSQL functions:
 >>> con = facata.connect(
 ...     "postgresql", "psycopg2", user="postgres", password="pw", host="localhost")
 >>>
->>> con.run("SELECT extract(millennium from now())")
-[(3.0,)]
+>>> con.run("SELECT TO_CHAR(TIMESTAMP '2021-10-10', 'YYYY BC')")
+[('2021 AD',)]
 
 ----
 
@@ -1512,8 +1513,8 @@ SQL parameters to the server. The default mapping that comes with Psycopg2 is de
 to work well in most cases, but you might want to add or replace the default mapping.
 
 A Python `datetime.timedelta` object is sent to the server as a PostgreSQL `interval`
-type,  which has the `oid` 1186. But let's say we wanted to create our own Python class
-to be sent as an `interval` type. Then we'd have to register an adapter:
+type. But let's say we wanted to create our own Python class to be sent as an
+`interval` type. Then we'd have to register an adapter:
 
 [source,python]
 ----
@@ -1529,8 +1530,8 @@ to be sent as an `interval` type. Then we'd have to register an adapter:
 >>> def my_interval_py_to_db(my_interval):
 ...     return AsIs(f"'{my_interval}'")  # Must return a str
 >>>
->>> con.register_py_to_db(MyInterval, None, my_interval_py_to_db)
->>> con.run("SELECT cast(:interval as interval)", interval=MyInterval("2 hours"))
+>>> con.register_py_to_db(MyInterval, my_interval_py_to_db)
+>>> con.run("SELECT CAST(:interval AS INTERVAL)", interval=MyInterval("2 hours"))
 [(datetime.timedelta(seconds=7200),)]
 
 ----
@@ -2319,6 +2320,13 @@ twine upload dist/*
 
 
 == Release Notes
+
+=== Version 0.1.0, 2021-11-10
+
+* Upgrade the drivers to their latest versions.
+
+* The `register_py_to_db` method now only takes two parameters.
+
 
 === Version 0.0.0, 2021-08-21
 

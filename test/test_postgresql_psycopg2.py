@@ -50,7 +50,7 @@ def test_register_py_to_db(postgresql_psycopg2_con):
     def point_py_to_db(point):
         return AsIs("'(%s, %s)'" % (point.x, point.y))
 
-    postgresql_psycopg2_con.register_py_to_db(Point, None, point_py_to_db)
+    postgresql_psycopg2_con.register_py_to_db(Point, point_py_to_db)
     result = postgresql_psycopg2_con.run("SELECT cast(:pt as point)", pt=Point(2, 4))
     assert result == [("(2,4)",)]
 

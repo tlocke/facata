@@ -6,7 +6,7 @@ class SqliteSqlite3Connection(Connection):
         self.cur = self.con.execute(sql, params)
         return None if self.cur.description is None else self.cur.fetchall()
 
-    def register_py_to_db(self, cls, type_code, adapter):
+    def register_py_to_db(self, cls, adapter):
         self.module.register_adapter(cls, adapter)
 
     def register_db_to_py(self, type_code, adapter):
